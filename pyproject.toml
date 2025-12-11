@@ -1,0 +1,12 @@
+[project]
+name = "auditing"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "adversarial-robustness-toolbox>=1.20.1",
+    "jax>=0.8.1",
+    "matplotlib>=3.10.8",
+    "scikit-learn>=1.8.0",
+]
