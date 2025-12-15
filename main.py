@@ -7,6 +7,8 @@ from sklearn.metrics import f1_score, accuracy_score
 from art.attacks.evasion import DecisionTreeAttack
 from art.estimators.classification.scikitlearn import ScikitlearnDecisionTreeClassifier
 
+import polars as pl
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -17,8 +19,10 @@ import json
 
 from collections import deque
 
+import argparse as parser
+
 SEED = 42
-key = jax.random.PRNGKey(SEED)
+# key = jax.random.PRNGKey(SEED)
 
 def make_data(n_samples, noise, type = "moons", SEED=42):
     if type == "moons":
@@ -32,6 +36,8 @@ def make_data(n_samples, noise, type = "moons", SEED=42):
         y = ((jnp.floor(X[:,0]) + jnp.floor(X[:,1])) % 2).astype(int)
         noise_idx = jax.random.choice(key2, a= n_samples*4, shape = (int(n_samples * 4 * noise),), replace=False)
         y = y.at[noise_idx].set(1 - y[noise_idx])
+        X = np.array(X)
+        y = np.array(y)
     return X, y
 
 
@@ -39,14 +45,13 @@ def audit_model(
         X,
         y, 
         SEED : int =42, 
-        max_depths : list =[1], 
         max_features :int = 2,
         stopping = 5
         ):
     acc_queue = deque(maxlen=stopping)
     acc_queue.extend([0,.1])
     d = 1
-    results = dict()
+    results = pl.DataFrame()
     # for d in max_depths:
 
     while np.std(acc_queue).item() >=.001:
@@ -58,9 +63,9 @@ def audit_model(
         train_f1s = []
         test_acces = []
         test_f1s = []
-        adv_acces = []
-        adv_f1s = []
-        adv_distances = []
+        avg_acces = []
+        avg_f1s = []
+        avg_distances = []
 
 
         for train_idx, test_idx in skf.split(X, y):
@@ -86,20 +91,22 @@ def audit_model(
             train_f1s.append(train_f1)
             test_acces.append(test_acc)
             test_f1s.append(test_f1)
-            adv_acces.append(acc_adv)
-            adv_f1s.append(f1_adv)
-            adv_distances.append(adv_distance)
+            avg_acces.append(acc_adv)
+            avg_f1s.append(f1_adv)
+            avg_distances.append(adv_distance.tolist())
 
         acc_queue.append(np.mean(test_acces).item())
 
-        res = {"train acc": np.mean(train_acces).item(), 
-               "train f1" : np.mean(train_f1s).item(), 
-               "test acc": np.mean(test_acces).item(), 
-               "test f1" : np.mean(test_f1s).item(), 
-               "adv acc": np.mean(adv_acces).item(), 
-               "adv f1": np.mean(adv_f1s).item(), 
-               "adv distance" : np.mean(adv_distances).item()}
-        results[f"max_depth = {d}"] = res
+        res = {"train acc": train_acces, 
+               "train f1" : train_f1s, 
+               "test acc": test_acces, 
+               "test f1" : test_f1s, 
+               "adv acc": avg_acces, 
+               "adv f1": avg_f1s, 
+               "adv distance" : avg_distances,
+               "depth" : d
+               }
+        results = pl.concat([results, pl.from_dict(res)])
         d += 1
         
     return results
@@ -113,13 +120,26 @@ def eval_model(X, y, classifier):
     return y_pred, acc, f1
 
 def main():
-    X, y = make_data(1000, .2, "moons")
-    plt.scatter(X[:, 0], X[:, 1], c=y, cmap='viridis')
-    plt.show()
-    results = audit_model(X, y, max_depths=[1,3,5,7,9,10,11,12,13,15,20])
+
+    seeds = [42,105,89,75,37,8]
+    datatypes = ["moons", "circles", 'check']
+
+    res = pl.DataFrame()
     
-    with open("data/data.json", 'w') as f:
-        json.dump(results, f)
+    for i in datatypes:
+        for j in seeds:
+    # plt.scatter(X[:, 0], X[:, 1], c=y, cmap='viridis')
+    # plt.show()
+            print(i + f"_{j}")
+            X, y = make_data(1000, .1, i)
+            results = audit_model(X, y,SEED=j)
+
+            results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"))
+
+            res = pl.concat([res,results])
+
+    
+    res.write_parquet("data/data.parquet")
 
 
 if __name__ == "__main__":
