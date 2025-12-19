@@ -1,11 +1,12 @@
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
 from sklearn.datasets import make_circles, make_moons, make_blobs
 from sklearn.model_selection import StratifiedKFold
 
 from sklearn.metrics import f1_score, accuracy_score
 
-from art.attacks.evasion import DecisionTreeAttack
-from art.estimators.classification.scikitlearn import ScikitlearnDecisionTreeClassifier
+from art.attacks.evasion import DecisionTreeAttack, FastGradientMethod
+from art.estimators.classification.scikitlearn import ScikitlearnDecisionTreeClassifier, ScikitlearnSVC
 
 import polars as pl
 
@@ -14,8 +15,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 import numpy as np
-
-import json
 
 from collections import deque
 
@@ -42,7 +41,7 @@ def make_data(n_samples, noise, type = "moons", SEED=42):
     return X, y
 
 
-def audit_model(
+def audit_tree(
         X,
         y, 
         SEED : int =42, 
@@ -127,8 +126,92 @@ def audit_model(
         
     return results
 
+def audit_svc(
+        X,
+        y, 
+        SEED : int =42, 
+        C: float = .3,
+        stopping : int = 5,
+        n_splits : int = 5,
+        top_k : int = 5
+        ):
+    acc_queue = deque(maxlen=stopping)
+    acc_queue.extend([0,.1])
+    d = 1
+    results = pl.DataFrame()
+    # for d in max_depths:
 
-                
+    while np.std(acc_queue).item() >=.001:
+        model = SVC(
+            random_state=SEED, C=C, kernel="rbf")
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
+        train_acces = []
+        train_f1s = []
+        test_acces = []
+        test_f1s = []
+        avg_acces = []
+        avg_f1s = []
+        avg_distances = []
+
+
+        for train_idx, test_idx in skf.split(X, y):
+            X_train = X[train_idx]
+            y_train = y[train_idx]
+            X_test = X[test_idx]
+            y_test = y[test_idx]
+            model.fit(X_train,y_train)
+
+            classifier = ScikitlearnSVC(model)
+
+            y_pred, test_acc, test_f1 = eval_model(X_test, y_test.reshape(y_test.shape[0],1), classifier)
+            y_train_pred, train_acc, train_f1 = eval_model(X_train, y_train.reshape(y_train.shape[0],1), classifier)
+            
+
+            attack = FastGradientMethod(estimator=classifier, eps=.07)
+            try:
+                x_attack_adv = attack.generate(x=X_test)
+            except:
+                break
+
+            
+            y_adv_pred, acc_adv, f1_adv = eval_model(x_attack_adv, y_test.reshape(y_test.shape[0],1), classifier)
+            distances = []
+            for idx, attack_data in enumerate(x_attack_adv):
+                true_label = y_test[idx]
+                attack_class_points = X_test[y_test != true_label]
+                distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
+                indices = np.argsort(distance_vector)[:top_k]
+                knn_distance = distance_vector[indices]
+                distances.append(np.mean(knn_distance).item())
+
+
+            adv_distance = np.mean(distances)
+            train_acces.append(train_acc)
+            train_f1s.append(train_f1)
+            test_acces.append(test_acc)
+            test_f1s.append(test_f1)
+            avg_acces.append(acc_adv)
+            avg_f1s.append(f1_adv)
+            avg_distances.append(adv_distance.tolist())
+
+        acc_queue.append(np.mean(test_acces).item())
+
+        res = {"train acc": train_acces, 
+               "train f1" : train_f1s, 
+               "test acc": test_acces, 
+               "test f1" : test_f1s, 
+               "adv acc": avg_acces, 
+               "adv f1": avg_f1s, 
+               "adv distance" : avg_distances,
+               "depth" : d
+               }
+        results = pl.concat([results, pl.from_dict(res)])
+        d += 1
+        
+    return results
+
+
+
 def eval_model(X, y, classifier):
     y_pred = classifier.predict(X)
     acc = accuracy_score(y, np.argmax(y_pred, axis = 1))
@@ -146,11 +229,16 @@ def main():
         for j in seeds:
             print(i + f"_{j}")
             X, y = make_data(5000, .15, i)
-            results = audit_model(X, y,SEED=j, n_splits=10)
+            results = audit_tree(X*10, y,SEED=j, n_splits=10)
 
-            results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"))
-
+            results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit("Tree").alias("model"))
             res = pl.concat([res,results])
+
+            results = audit_svc(X*10, y,SEED=j, n_splits=10)
+
+            results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit("SVC").alias("model"))
+            res = pl.concat([res,results])
+
 
     
     res.write_parquet("data/data.parquet")
