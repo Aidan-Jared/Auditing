@@ -12,7 +12,7 @@ import polars as pl
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import PyTree,  Array
+from jaxtyping import PyTree,  Array, Float
 import equinox as eqx
 
 import numpy as np
@@ -24,9 +24,9 @@ from collections import deque
 def FGSM(
         model: PyTree,
         x: Array,
-        y: Array
+        y: Array,
+        epsilon: Float
 ) ->tuple[Array, Array]:
-    epsilon = .1
 
     def loss_fn(x):
         y_pred = jax.vmap(model)(x)
