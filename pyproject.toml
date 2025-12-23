@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "adversarial-robustness-toolbox>=1.20.1",
+    "equinox>=0.13.2",
     "jax>=0.8.1",
     "matplotlib>=3.10.8",
     "scikit-learn>=1.8.0",
