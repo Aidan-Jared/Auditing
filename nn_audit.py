@@ -5,8 +5,6 @@ import optax
 import numpy as np
 
 from jaxtyping import PyTree, Array, Int, Float
-from jax_meta.utils.losses import cross_entropy
-from jax_meta.utils.metrics import accuracy
 
 from torch.utils.data import DataLoader, TensorDataset
 from torch import manual_seed, tensor
@@ -29,7 +27,7 @@ def find_distance(
         X: Array, 
         y: Array,
 ):
-    eps = jnp.linspace(0, 1, 20)
+    eps = jnp.linspace(0, 1, 21)
     results = dict()
     for epsilon in eps:
         _, is_adv = FGSM(model, X, y, epsilon)
@@ -45,8 +43,9 @@ def loss(
 ):
     y_pred = jax.vmap(model)(X)
     y_pred = jax.nn.log_softmax(y_pred)
-    loss_value = cross_entropy(y_pred, y)
-    acc = accuracy(y_pred, y)
+    loss_value = optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
+    pred_c = jnp.argmax(y_pred, axis=1)
+    acc= jnp.mean(y == pred_c)
     return jnp.mean(loss_value), acc
 
 
@@ -57,7 +56,7 @@ def train(
         epochs: Int,
         lr: Float
 ):
-    optim = optax.sgd(lr)
+    optim = optax.adamw(lr)
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
     @eqx.filter_jit
@@ -121,13 +120,13 @@ def main():
     model = eqx.nn.MLP(
         in_size=2,
         out_size=2,
-        width_size=128,
-        depth=10,
+        width_size=64,
+        depth=4,
         key=key,
-        activation=jax.nn.elu
+        activation=jax.nn.gelu
     )
 
-    X, y = make_data(n_samples=1000, noise=.1, type="circles", SEED=SEED)
+    X, y = make_data(n_samples=5000, noise=0.05, type="circles", SEED=SEED)
 
     train_idx = jax.random.permutation(subkey, int(y.shape[0] * .8))
     traindata = TensorDataset(tensor(X[train_idx]), tensor(y[train_idx]))
@@ -141,7 +140,7 @@ def main():
         trainloader,
         testloader,
         epochs=EPOCHS,
-        lr=1e-3
+        lr=1e-4
     )
 
     pd.DataFrame(results).to_parquet("data/nnData.parquet")
