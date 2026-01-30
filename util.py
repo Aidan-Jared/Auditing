@@ -1,6 +1,8 @@
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.datasets import make_circles, make_moons, make_blobs
+from sklearn.cluster import DBSCAN
+from sklearn.metrics import silhouette_score
 from sklearn.model_selection import StratifiedKFold
 
 from sklearn.metrics import f1_score, accuracy_score
@@ -156,7 +158,8 @@ def audit_tree_bias(
         max_features :int = 2,
         stopping : int = 5,
         n_splits : int = 5,
-        top_k : int = 5
+        top_k : int = 5,
+        dbscan : bool = False,
         ):
     acc_queue = deque(maxlen=stopping)
     acc_queue.extend([0,.1])
@@ -205,13 +208,23 @@ def audit_tree_bias(
             
             y_adv_pred, acc_adv, f1_adv = eval_model(x_attack_adv, y_test.reshape(y_test.shape[0],1), classifier)
             distances = []
-            for idx, attack_data in enumerate(x_attack_adv):
-                true_label = y_test[idx]
-                attack_class_points = X_test[y_test != true_label]
-                distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
-                indices = np.argsort(distance_vector)[:top_k]
-                knn_distance = distance_vector[indices]
-                distances.append(np.mean(knn_distance).item())
+
+            if dbscan:
+                    clustering = DBSCAN(eps=.05).fit(x_attack_adv)
+                    labels = np.unique(clustering.labels_[clustering.labels_ != -1])
+                    for i in labels:
+                        idx = np.argwhere(clustering.labels_ == i)
+                        group = x_attack_adv[idx]
+                        distance = np.linalg.norm(group) / len(group)
+                        distances.append(distance)
+            else:
+                for idx, attack_data in enumerate(x_attack_adv):
+                    true_label = y_test[idx]
+                    attack_class_points = X_test[y_test != true_label]
+                    distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
+                    indices = np.argsort(distance_vector)[:top_k]
+                    knn_distance = distance_vector[indices]
+                    distances.append(np.mean(knn_distance).item())
 
 
             adv_distance = np.mean(distances)

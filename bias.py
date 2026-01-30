@@ -27,7 +27,7 @@ def main():
                 X, y = make_data(5000, .15, i)
                 
 
-                results = audit_tree_bias(X, y, k,SEED=j, n_splits=10)
+                results = audit_tree_bias(X, y, k,SEED=j, n_splits=10, dbscan=True)
 
                 results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit("Tree").alias("model"))
                 res = pl.concat([res,results])
