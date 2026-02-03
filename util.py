@@ -179,6 +179,7 @@ def audit_tree_bias(
         avg_acces = []
         avg_f1s = []
         avg_distances = []
+        clusters = []
 
 
         for train_idx, test_idx in skf.split(X, y):
@@ -215,8 +216,19 @@ def audit_tree_bias(
                     for i in labels:
                         idx = np.argwhere(clustering.labels_ == i)
                         group = x_attack_adv[idx]
-                        distance = np.linalg.norm(group) / len(group)
-                        distances.append(distance)
+                        i = 0
+                        distance = 0
+                        count = 0
+                        if group.shape[0] > 1:
+                            for point1 in group:
+                                for point2 in group[i+1:]:
+                                    distance += np.linalg.norm((point1, point2)).item()
+                                    count += 1
+                            distance = count / distance
+                            distances.append(distance)
+                        else:
+                            distances.append(0)
+                    clusters.append(len(labels))
             else:
                 for idx, attack_data in enumerate(x_attack_adv):
                     true_label = y_test[idx]
@@ -245,6 +257,7 @@ def audit_tree_bias(
                "adv acc": avg_acces, 
                "adv f1": avg_f1s, 
                "adv distance" : avg_distances,
+               "clusters" : clusters,
                "depth" : d,
                "bias" : bias,
                }
