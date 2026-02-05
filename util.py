@@ -2,8 +2,9 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.datasets import make_circles, make_moons, make_blobs
 from sklearn.cluster import DBSCAN
-from sklearn.metrics import silhouette_score
+# from sklearn.metrics import silhouette_score
 from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import LabelEncoder
 
 from sklearn.metrics import f1_score, accuracy_score
 
@@ -64,6 +65,12 @@ def make_data(n_samples, noise, type = "moons", SEED=42):
         y = np.array(y)
     return X, y
 
+def labelencoding(X):
+    for i in range(X.shape[1]):
+        le = LabelEncoder()
+        X[:, i] = le.fit_transform(X[:, i])
+    X = X.astype(int)
+    return X
 
 def audit_tree(
         X,
@@ -118,7 +125,7 @@ def audit_tree(
             distances = []
             for idx, attack_data in enumerate(x_attack_adv):
                 true_label = y_test[idx]
-                attack_class_points = X_test[y_test != true_label]
+                attack_class_points = X_test[y_test.T.squeeze(0) != true_label]
                 distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
                 indices = np.argsort(distance_vector)[:top_k]
                 knn_distance = distance_vector[indices]
@@ -160,6 +167,7 @@ def audit_tree_bias(
         n_splits : int = 5,
         top_k : int = 5,
         dbscan : bool = False,
+        target_bias : int = 0
         ):
     acc_queue = deque(maxlen=stopping)
     acc_queue.extend([0,.1])
@@ -188,11 +196,20 @@ def audit_tree_bias(
             X_test = X[test_idx]
             y_test = y[test_idx]
 
-            mask = (X_train[:,0] < bias)[y_train == 1]
-            X_train = np.vstack((X_train[y_train==1][mask], X_train[y_train==0]))
-            y_train = np.hstack((y_train[y_train==1][mask], y_train[y_train==0]))
+            X_sort = np.sort(X_train[:,0][y_train.squeeze(1) == target_bias])
+            bias_idx = int(X_sort.shape[0] * bias.item())
 
-            model.fit(X_train,y_train)
+            mask = (X_train[:,0] < X_sort[bias_idx])[y_train.squeeze(1) == target_bias]
+            X_train_b = np.vstack((X_train[y_train.squeeze(1)==target_bias][mask]))
+            y_train_b = np.vstack((y_train[y_train.squeeze(1)==target_bias][mask]))
+            for i in np.unique(y_train):
+                if i != target_bias:
+                    X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1)==i]))
+                    y_train_b = np.vstack((y_train_b, y_train[y_train.squeeze(1)==i]))
+            
+
+
+            model.fit(X_train_b,y_train_b)
 
             classifier = ScikitlearnDecisionTreeClassifier(model)
 
@@ -211,7 +228,7 @@ def audit_tree_bias(
             distances = []
 
             if dbscan:
-                    clustering = DBSCAN(eps=.05).fit(x_attack_adv)
+                    clustering = DBSCAN(eps=12).fit(x_attack_adv)
                     labels = np.unique(clustering.labels_[clustering.labels_ != -1])
                     for i in labels:
                         idx = np.argwhere(clustering.labels_ == i)
@@ -354,5 +371,5 @@ def audit_tree_bias(
 def eval_model(X, y, classifier):
     y_pred = classifier.predict(X)
     acc = accuracy_score(y, np.argmax(y_pred, axis = 1))
-    f1 = f1_score(y, np.argmax(y_pred, axis = 1))
+    f1 = f1_score(y, np.argmax(y_pred, axis = 1), average="macro")
     return y_pred, acc, f1
