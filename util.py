@@ -161,6 +161,7 @@ def audit_tree_bias(
         X,
         y,
         bias,
+        depth: int = 10,
         SEED : int =42, 
         max_features :int = 2,
         stopping : int = 5,
@@ -169,117 +170,117 @@ def audit_tree_bias(
         dbscan : bool = False,
         target_bias : int = 0
         ):
-    acc_queue = deque(maxlen=stopping)
-    acc_queue.extend([0,.1])
-    d = 1
+    # acc_queue = deque(maxlen=stopping)
+    # acc_queue.extend([0,.1])
+    # d = 1
     results = pl.DataFrame()
     # for d in max_depths:
 
-    while np.std(acc_queue).item() >=.001:
-        model = DecisionTreeClassifier(
-            random_state=SEED, max_features=max_features,
-            max_depth=d, min_samples_split=2, min_samples_leaf=1)
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
-        train_acces = []
-        train_f1s = []
-        test_acces = []
-        test_f1s = []
-        avg_acces = []
-        avg_f1s = []
-        avg_distances = []
-        clusters = []
+    # while np.std(acc_queue).item() >=.001:
+    model = DecisionTreeClassifier(
+        random_state=SEED, max_features=max_features,
+        max_depth=depth, min_samples_split=2, min_samples_leaf=1)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
+    train_acces = []
+    train_f1s = []
+    test_acces = []
+    test_f1s = []
+    avg_acces = []
+    avg_f1s = []
+    avg_distances = []
+    clusters = []
 
 
-        for train_idx, test_idx in skf.split(X, y):
-            X_train = X[train_idx]
-            y_train = y[train_idx]
-            X_test = X[test_idx]
-            y_test = y[test_idx]
+    for train_idx, test_idx in skf.split(X, y):
+        X_train = X[train_idx]
+        y_train = y[train_idx]
+        X_test = X[test_idx]
+        y_test = y[test_idx]
 
-            X_sort = np.sort(X_train[:,0][y_train.squeeze(1) == target_bias])
-            bias_idx = int(X_sort.shape[0] * bias.item())
+        X_sort = np.sort(X_train[:,0][y_train.squeeze(1) == target_bias])
+        bias_idx = int(X_sort.shape[0] * bias.item())
 
-            mask = (X_train[:,0] < X_sort[bias_idx])[y_train.squeeze(1) == target_bias]
-            X_train_b = np.vstack((X_train[y_train.squeeze(1)==target_bias][mask]))
-            y_train_b = np.vstack((y_train[y_train.squeeze(1)==target_bias][mask]))
-            for i in np.unique(y_train):
-                if i != target_bias:
-                    X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1)==i]))
-                    y_train_b = np.vstack((y_train_b, y_train[y_train.squeeze(1)==i]))
-            
-
-
-            model.fit(X_train_b,y_train_b)
-
-            classifier = ScikitlearnDecisionTreeClassifier(model)
-
-            y_pred, test_acc, test_f1 = eval_model(X_test, y_test.reshape(y_test.shape[0],1), classifier)
-            y_train_pred, train_acc, train_f1 = eval_model(X_train, y_train.reshape(y_train.shape[0],1), classifier)
-            
-
-            attack = DecisionTreeAttack(classifier=classifier)
-            try:
-                x_attack_adv = attack.generate(x=X_test)
-            except:
-                break
-
-            
-            y_adv_pred, acc_adv, f1_adv = eval_model(x_attack_adv, y_test.reshape(y_test.shape[0],1), classifier)
-            distances = []
-
-            if dbscan:
-                    clustering = DBSCAN(eps=12).fit(x_attack_adv)
-                    labels = np.unique(clustering.labels_[clustering.labels_ != -1])
-                    for i in labels:
-                        idx = np.argwhere(clustering.labels_ == i)
-                        group = x_attack_adv[idx]
-                        i = 0
-                        distance = 0
-                        count = 0
-                        if group.shape[0] > 1:
-                            for point1 in group:
-                                for point2 in group[i+1:]:
-                                    distance += np.linalg.norm((point1, point2)).item()
-                                    count += 1
-                            distance = count / distance
-                            distances.append(distance)
-                        else:
-                            distances.append(0)
-                    clusters.append(len(labels))
-            else:
-                for idx, attack_data in enumerate(x_attack_adv):
-                    true_label = y_test[idx]
-                    attack_class_points = X_test[y_test != true_label]
-                    distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
-                    indices = np.argsort(distance_vector)[:top_k]
-                    knn_distance = distance_vector[indices]
-                    distances.append(np.mean(knn_distance).item())
+        mask = (X_train[:,0] > X_sort[bias_idx])[y_train.squeeze(1) == target_bias]
+        X_train_b = np.vstack((X_train[y_train.squeeze(1)==target_bias][mask]))
+        y_train_b = np.vstack((y_train[y_train.squeeze(1)==target_bias][mask]))
+        for i in np.unique(y_train):
+            if i != target_bias:
+                X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1)==i]))
+                y_train_b = np.vstack((y_train_b, y_train[y_train.squeeze(1)==i]))
+        
 
 
-            adv_distance = np.mean(distances)
-            train_acces.append(train_acc)
-            train_f1s.append(train_f1)
-            test_acces.append(test_acc)
-            test_f1s.append(test_f1)
-            avg_acces.append(acc_adv)
-            avg_f1s.append(f1_adv)
-            avg_distances.append(adv_distance.tolist())
+        model.fit(X_train_b,y_train_b)
 
-        acc_queue.append(np.mean(test_acces).item())
+        classifier = ScikitlearnDecisionTreeClassifier(model)
 
-        res = {"train acc": train_acces, 
-               "train f1" : train_f1s, 
-               "test acc": test_acces, 
-               "test f1" : test_f1s, 
-               "adv acc": avg_acces, 
-               "adv f1": avg_f1s, 
-               "adv distance" : avg_distances,
-               "clusters" : clusters,
-               "depth" : d,
-               "bias" : bias,
-               }
-        results = pl.concat([results, pl.from_dict(res)])
-        d += 1
+        y_pred, test_acc, test_f1 = eval_model(X_test, y_test.reshape(y_test.shape[0],1), classifier)
+        y_train_pred, train_acc, train_f1 = eval_model(X_train, y_train.reshape(y_train.shape[0],1), classifier)
+        
+
+        attack = DecisionTreeAttack(classifier=classifier)
+        try:
+            x_attack_adv = attack.generate(x=X_test)
+        except:
+            break
+
+        
+        y_adv_pred, acc_adv, f1_adv = eval_model(x_attack_adv, y_test.reshape(y_test.shape[0],1), classifier)
+        distances = []
+
+        if dbscan:
+                clustering = DBSCAN(eps=12).fit(x_attack_adv)
+                labels = np.unique(clustering.labels_[clustering.labels_ != -1])
+                for i in labels:
+                    idx = np.argwhere(clustering.labels_ == i)
+                    group = x_attack_adv[idx]
+                    i = 0
+                    distance = 0
+                    count = 0
+                    if group.shape[0] > 1:
+                        for point1 in group:
+                            for point2 in group[i+1:]:
+                                distance += np.linalg.norm((point1, point2)).item()
+                                count += 1
+                        distance = count / distance
+                        distances.append(distance)
+                    else:
+                        distances.append(0)
+                clusters.append(len(labels))
+        else:
+            for idx, attack_data in enumerate(x_attack_adv):
+                true_label = y_test[idx]
+                attack_class_points = X_test[y_test != true_label]
+                distance_vector = np.sqrt(np.sum((attack_data - attack_class_points)**2, axis=1))
+                indices = np.argsort(distance_vector)[:top_k]
+                knn_distance = distance_vector[indices]
+                distances.append(np.mean(knn_distance).item())
+
+
+        adv_distance = np.mean(distances)
+        train_acces.append(train_acc)
+        train_f1s.append(train_f1)
+        test_acces.append(test_acc)
+        test_f1s.append(test_f1)
+        avg_acces.append(acc_adv)
+        avg_f1s.append(f1_adv)
+        avg_distances.append(adv_distance.tolist())
+
+        # acc_queue.append(np.mean(test_acces).item())
+
+    res = {"train acc": train_acces, 
+            "train f1" : train_f1s, 
+            "test acc": test_acces, 
+            "test f1" : test_f1s, 
+            "adv acc": avg_acces, 
+            "adv f1": avg_f1s, 
+            "adv distance" : avg_distances,
+            "clusters" : clusters,
+        #    "depth" : d,
+            "bias" : bias.item(),
+            }
+    results = pl.concat([results, pl.from_dict(res)])
+    # d += 1
         
     return results
 
