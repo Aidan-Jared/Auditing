@@ -14,21 +14,29 @@ def main():
     # datatypes = ["moons", "circles"] # , 'check'
     introduced_bias = np.linspace(.1,1, 9,False)
 
-    data = fetch_ucirepo('iris')
-    X = labelencoding(data.data.features.to_numpy().copy())
-    y = labelencoding(data.data.targets.to_numpy().copy())
-
+    
     res = pl.DataFrame()
     
-    for i in np.unique(y):
-        for j in seeds:
-            for k in introduced_bias:
-                # print(i + f"_{j}")
-                # X, y = make_data(5000, .15, i)
-                results = audit_tree_bias(X, y, k,SEED=j, n_splits=10, dbscan=True, target_bias=i.item())
+    for dataset in ["iris", "wine", "Car Evaluation"]:
+        data = fetch_ucirepo(dataset)
+        X = labelencoding(data.data.features.to_numpy().copy())
+        y = labelencoding(data.data.targets.to_numpy().copy())
 
-                results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit("Tree").alias("model"))
-                res = pl.concat([res,results])
+        for i in np.unique(y):
+            for feature in range(X.shape[1]):
+                for j in seeds:
+                    for k in introduced_bias:
+                        # print(i + f"_{j}")
+                        # X, y = make_data(5000, .15, i)
+                        results = audit_tree_bias(X, y, k, stopping= feature, SEED=j, n_splits=10, dbscan=True, target_bias=i.item())
+
+                        results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit(dataset + "_feature" + str(feature)).alias("dataset"), pl.lit("undersampling").alias("bias_type"))
+                        res = pl.concat([res,results])
+
+                        results = audit_tree_bias(X, y, k, stopping= feature, SEED=j, n_splits=10, dbscan=True, target_bias=i.item(), over=True)
+
+                        results = results.with_columns(pl.lit(i).alias("distribution"), pl.lit(j).alias("seed"), pl.lit(dataset + "_feature" + str(feature)).alias("dataset"), pl.lit("oversampling").alias("bias_type"))
+                        res = pl.concat([res,results])
 
             # results = audit_svc(X*10, y,SEED=j, n_splits=10)
 

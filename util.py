@@ -1,10 +1,11 @@
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.datasets import make_circles, make_moons, make_blobs
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import OPTICS
 # from sklearn.metrics import silhouette_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
+from imblearn.over_sampling import SMOTE
 
 from sklearn.metrics import f1_score, accuracy_score
 
@@ -168,7 +169,8 @@ def audit_tree_bias(
         n_splits : int = 5,
         top_k : int = 5,
         dbscan : bool = False,
-        target_bias : int = 0
+        target_bias : int = 0,
+        over: bool = False
         ):
     # acc_queue = deque(maxlen=stopping)
     # acc_queue.extend([0,.1])
@@ -190,23 +192,32 @@ def audit_tree_bias(
     avg_distances = []
     clusters = []
 
-
     for train_idx, test_idx in skf.split(X, y):
         X_train = X[train_idx]
         y_train = y[train_idx]
         X_test = X[test_idx]
         y_test = y[test_idx]
 
-        X_sort = np.sort(X_train[:,0][y_train.squeeze(1) == target_bias])
+        X_sort = np.sort(X_train[:,stopping][y_train.squeeze(1) == target_bias])
         bias_idx = int(X_sort.shape[0] * bias.item())
 
-        mask = (X_train[:,0] > X_sort[bias_idx])[y_train.squeeze(1) == target_bias]
-        X_train_b = np.vstack((X_train[y_train.squeeze(1)==target_bias][mask]))
-        y_train_b = np.vstack((y_train[y_train.squeeze(1)==target_bias][mask]))
+        mask = (X_train[:,stopping] > X_sort[bias_idx])[y_train.squeeze(1) == target_bias]
+        X_train_b = (X_train[y_train.squeeze(1)==target_bias][mask])
+        y_train_b = (y_train[y_train.squeeze(1)==target_bias][mask])
+
         for i in np.unique(y_train):
             if i != target_bias:
                 X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1)==i]))
                 y_train_b = np.vstack((y_train_b, y_train[y_train.squeeze(1)==i]))
+        
+        if over:
+            if mask.sum() <= 5:
+                extra = np.random.choice(range(X_train[y_train.squeeze(1) == target_bias].shape[0]), replace=False, size=5)
+                X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1) == target_bias][extra]))
+                y_train_b = np.vstack((y_train_b, y_train[y_train.squeeze(1) == target_bias][extra]))
+            X_train_b, y_train_b = SMOTE(random_state=SEED, k_neighbors=4).fit_resample(X_train_b, y_train_b)
+            X_train_b = np.vstack((X_train_b, X_train[y_train.squeeze(1) == target_bias][~mask]))
+            y_train_b = np.vstack((y_train_b.reshape(y_train_b.shape[0],-1), y_train[y_train.squeeze(1) == target_bias][~mask]))
         
 
 
@@ -229,7 +240,7 @@ def audit_tree_bias(
         distances = []
 
         if dbscan:
-                clustering = DBSCAN(eps=12).fit(x_attack_adv)
+                clustering = OPTICS().fit(x_attack_adv)
                 labels = np.unique(clustering.labels_[clustering.labels_ != -1])
                 for i in labels:
                     idx = np.argwhere(clustering.labels_ == i)
@@ -242,7 +253,7 @@ def audit_tree_bias(
                             for point2 in group[i+1:]:
                                 distance += np.linalg.norm((point1, point2)).item()
                                 count += 1
-                        distance = count / distance
+                        distance = count / (distance+1)
                         distances.append(distance)
                     else:
                         distances.append(0)
