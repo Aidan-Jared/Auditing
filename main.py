@@ -5,7 +5,6 @@ from ucimlrepo import fetch_ucirepo
 
 
 SEED = 42
-# key = jax.random.PRNGKey(SEED)
 
 def target_enocde(y):
     y_new = y.copy()
