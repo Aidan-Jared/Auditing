@@ -6,9 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "adversarial-robustness-toolbox>=1.20.1",
-    "equinox>=0.13.2",
+    "altair[all]>=6.0.0",
+    "jax>=0.8.1",
     "jax-meta>=1.0.3",
-    "jax[cuda13]>=0.8.1",
     "matplotlib>=3.10.8",
     "pandas>=2.3.3",
     "polars>=1.36.1",
